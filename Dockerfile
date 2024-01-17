@@ -1,6 +1,6 @@
 FROM golang:latest
-COPY /app .
+WORKDIR /app
+COPY . ..
 RUN go mod download
 RUN go build -o /godocker
-EXPOSE $SERVER_PORT
 CMD [ "/godocker" ]

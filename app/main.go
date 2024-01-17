@@ -139,7 +139,7 @@ func main() {
 		pubSubEncoding = cfg.SchemaSettings.Encoding
 	}
 
-	log.Printf("Server listening at %v", lis.Addr())
+	log.Println("Server listening at %v", lis.Addr())
 
 	errorSrv := s.Serve(lis)
 	if errorSrv != nil {
