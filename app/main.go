@@ -47,6 +47,12 @@ func InternalSyntaxVerification(email string) (*pb.VerificationResponse, error) 
 	return &pb.VerificationResponse{Valid: true}, nil
 }
 
+func (s *server) SimpleVerification(ctx context.Context, in *pb.VerificationRequest) (*pb.VerificationResponse, error) {
+	response, err := InternalSimpleVerification(in.Email)
+	go PubSubPublish(ctx, &pb.VerificationOutput{Email: in.Email, Valid: response.Valid, ErrorMessage: response.ErrorMessage})
+	return response, err
+}
+
 func InternalSimpleVerification(email string) (*pb.VerificationResponse, error) {
 	response, syntaxErr := InternalSyntaxVerification(email)
 	if response.Valid {
@@ -59,8 +65,8 @@ func InternalSimpleVerification(email string) (*pb.VerificationResponse, error) 
 	return response, syntaxErr
 }
 
-func (s *server) SimpleVerification(ctx context.Context, in *pb.VerificationRequest) (*pb.VerificationResponse, error) {
-	response, err := InternalSimpleVerification(in.Email)
+func (s *server) FullVerification(ctx context.Context, in *pb.VerificationRequest) (*pb.VerificationResponse, error) {
+	response, err := InternalFullVerification(in.Email)
 	go PubSubPublish(ctx, &pb.VerificationOutput{Email: in.Email, Valid: response.Valid, ErrorMessage: response.ErrorMessage})
 	return response, err
 }
@@ -72,7 +78,6 @@ func InternalFullVerification(email string) (*pb.VerificationResponse, error) {
 		defer cancel()
 		vrfyResponse, err := vrfyClient.Verify(ctx, &pb.VrfyRequest{Email: email})
 		if err != nil {
-			log.Printf("Vrfy response: %s", err)
 			return &pb.VerificationResponse{Valid: false, ErrorMessage: &errorMessage}, nil
 		}
 		if vrfyResponse.StatusCode != 0 {
@@ -82,12 +87,6 @@ func InternalFullVerification(email string) (*pb.VerificationResponse, error) {
 	} else {
 		return response, syntaxErr
 	}
-}
-
-func (s *server) FullVerification(ctx context.Context, in *pb.VerificationRequest) (*pb.VerificationResponse, error) {
-	response, err := InternalFullVerification(in.Email)
-	go PubSubPublish(ctx, &pb.VerificationOutput{Email: in.Email, Valid: response.Valid, ErrorMessage: response.ErrorMessage})
-	return response, err
 }
 
 func PubSubPublish(ctx context.Context, in *pb.VerificationOutput) {
