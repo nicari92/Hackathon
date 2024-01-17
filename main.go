@@ -1,12 +1,15 @@
 package main
 
 import (
+	"cloud.google.com/go/pubsub"
 	"context"
 	"fmt"
+	"github.com/golang/protobuf/proto"
 	_ "github.com/golang/protobuf/proto"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/reflection"
+	"google.golang.org/protobuf/encoding/protojson"
 	pb "hackathon/protos"
 	"log"
 	"net"
@@ -25,45 +28,79 @@ var matcher, _ = regexp.Compile("(?:[a-z0-9!#$%&'*+/=?^_`{|}~-]+(?:\\.[a-z0-9!#$
 var errorMessage = "Email not valid"
 
 var (
-	vrfyClient pb.VrfyServiceClient = nil
+	vrfyClient     pb.VrfyServiceClient = nil
+	pubSubClient   *pubsub.Client       = nil
+	pubSubTopic    *pubsub.Topic        = nil
+	pubSubEncoding pubsub.SchemaEncoding
 )
 
-func (s *server) SyntaxVerification(_ context.Context, in *pb.VerificationRequest) (*pb.VerificationResponse, error) {
+func (s *server) SyntaxVerification(ctx context.Context, in *pb.VerificationRequest) (*pb.VerificationResponse, error) {
+	response, err := InternalSyntaxVerification(in.Email)
+	go PubSubPublish(ctx, &pb.VerificationOutput{Email: in.Email, Valid: response.Valid, ErrorMessage: response.ErrorMessage})
+	return response, err
+}
 
-	if !matcher.MatchString(in.Email) {
+func InternalSyntaxVerification(email string) (*pb.VerificationResponse, error) {
+	if !matcher.MatchString(email) {
 		return &pb.VerificationResponse{Valid: false, ErrorMessage: &errorMessage}, nil
 	}
 	return &pb.VerificationResponse{Valid: true}, nil
 }
 
-func (s *server) SimpleVerification(_ context.Context, in *pb.VerificationRequest) (*pb.VerificationResponse, error) {
-	if matcher.MatchString(in.GetEmail()) {
-		_, err := net.LookupIP(strings.Split(in.Email, "@")[1])
+func InternalSimpleVerification(email string) (*pb.VerificationResponse, error) {
+	response, syntaxErr := InternalSyntaxVerification(email)
+	if response.Valid {
+		_, err := net.LookupIP(strings.Split(email, "@")[1])
 		if err != nil {
 			return &pb.VerificationResponse{Valid: false, ErrorMessage: &errorMessage}, nil
 		}
 		return &pb.VerificationResponse{Valid: true}, nil
 	}
-	return &pb.VerificationResponse{Valid: false, ErrorMessage: &errorMessage}, nil
+	return response, syntaxErr
+}
+
+func (s *server) SimpleVerification(ctx context.Context, in *pb.VerificationRequest) (*pb.VerificationResponse, error) {
+	response, err := InternalSimpleVerification(in.Email)
+	go PubSubPublish(ctx, &pb.VerificationOutput{Email: in.Email, Valid: response.Valid, ErrorMessage: response.ErrorMessage})
+	return response, err
+}
+
+func InternalFullVerification(email string) (*pb.VerificationResponse, error) {
+	response, syntaxErr := InternalSimpleVerification(email)
+	if response.Valid {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		vrfyResponse, err := vrfyClient.Verify(ctx, &pb.VrfyRequest{Email: email})
+		if err != nil {
+			log.Printf("Vrfy response: %s", err)
+			return &pb.VerificationResponse{Valid: false, ErrorMessage: &errorMessage}, nil
+		}
+		if vrfyResponse.StatusCode != 0 {
+			return &pb.VerificationResponse{Valid: false, ErrorMessage: &errorMessage}, nil
+		}
+		return &pb.VerificationResponse{Valid: true}, nil
+	} else {
+		return response, syntaxErr
+	}
 }
 
 func (s *server) FullVerification(ctx context.Context, in *pb.VerificationRequest) (*pb.VerificationResponse, error) {
-	r, _ := s.SimpleVerification(ctx, in)
-	if !r.Valid {
-		return &pb.VerificationResponse{Valid: false, ErrorMessage: &errorMessage}, nil
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-	vrfyResponse, err := vrfyClient.Verify(ctx, &pb.VrfyRequest{Email: in.Email})
-	if err != nil {
-		log.Printf("Vrfy response: %s", err)
-		return &pb.VerificationResponse{Valid: false, ErrorMessage: &errorMessage}, nil
+	response, err := InternalFullVerification(in.Email)
+	go PubSubPublish(ctx, &pb.VerificationOutput{Email: in.Email, Valid: response.Valid, ErrorMessage: response.ErrorMessage})
+	return response, err
+}
 
+func PubSubPublish(ctx context.Context, in *pb.VerificationOutput) {
+	var msg []byte
+	switch pubSubEncoding {
+	case pubsub.EncodingBinary:
+		msg, _ = proto.Marshal(in)
+	default:
+		msg, _ = protojson.Marshal(in)
 	}
-	if vrfyResponse.StatusCode != 0 {
-		return &pb.VerificationResponse{Valid: false, ErrorMessage: &errorMessage}, nil
-	}
-	return &pb.VerificationResponse{Valid: true}, nil
+	pubSubTopic.Publish(ctx, &pubsub.Message{
+		Data: msg,
+	})
 }
 
 func main() {
@@ -79,6 +116,9 @@ func main() {
 		log.Fatalf("failed to parse VRFY_PORT: %v", err)
 	}
 
+	pubSubTopicName := os.Getenv("PUBSUB_TOPIC")
+	pubSubProject := os.Getenv("PUBSUB_PROJECT")
+
 	lis, err := net.Listen("tcp", fmt.Sprintf(":%d", serverPort))
 	if err != nil {
 		log.Fatalf("failed to listen: %v", err)
@@ -92,6 +132,14 @@ func main() {
 	}
 	defer conn.Close()
 	vrfyClient = pb.NewVrfyServiceClient(conn)
+
+	pubSubClient, err = pubsub.NewClient(context.Background(), pubSubProject)
+	pubSubTopic = pubSubClient.Topic(pubSubTopicName)
+	cfg, err := pubSubTopic.Config(context.Background())
+	if cfg.SchemaSettings != nil {
+		pubSubEncoding = cfg.SchemaSettings.Encoding
+	}
+
 	log.Printf("Server listening at %v", lis.Addr())
 
 	errorSrv := s.Serve(lis)

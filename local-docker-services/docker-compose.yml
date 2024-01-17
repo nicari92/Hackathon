@@ -4,6 +4,11 @@ services:
   vrfyService:
     image: eu.gcr.io/jobrapido-sandbox/vrfy-dummy-wrap:20240115
     ports:
-      - "9090:9090"
+      - "9091:9091"
     environment:
-      - SERVER_PORT=9090
+      - SERVER_PORT=9091
+
+  pubsub_emulator:
+    image: eu.gcr.io/jobrapido-sandbox/pubsub-emulator:1.0
+    ports:
+      - "8085"
