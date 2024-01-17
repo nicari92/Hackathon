@@ -12,6 +12,7 @@ import (
 	"os"
 	"regexp"
 	"strconv"
+	"strings"
 )
 
 type server struct {
@@ -19,16 +20,25 @@ type server struct {
 }
 
 var matcher, _ = regexp.Compile("(?:[a-z0-9!#$%&'*+/=?^_`{|}~-]+(?:\\.[a-z0-9!#$%&'*+/=?^_`{|}~-]+)*|\"(?:[\\x01-\\x08\\x0b\\x0c\\x0e-\\x1f\\x21\\x23-\\x5b\\x5d-\\x7f]|\\\\[\\x01-\\x09\\x0b\\x0c\\x0e-\\x7f])*\")@(?:(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\\.)+[a-z0-9](?:[a-z0-9-]*[a-z0-9])?|\\[(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?|[a-z0-9-]*[a-z0-9]:(?:[\\x01-\\x08\\x0b\\x0c\\x0e-\\x1f\\x21-\\x5a\\x53-\\x7f]|\\\\[\\x01-\\x09\\x0b\\x0c\\x0e-\\x7f])+)\\])")
+var errorMessage = "Email not valid"
 
 func (s *server) SyntaxVerification(ctx context.Context, in *pb.VerificationRequest) (*pb.VerificationResponse, error) {
-	log.Printf("Received: %v", in.GetEmail())
-	errorMessage := "Email not valid"
 
-	if !matcher.MatchString(in.GetEmail()) {
+	if !matcher.MatchString(in.Email) {
 		return &pb.VerificationResponse{Valid: false, ErrorMessage: &errorMessage}, nil
 	}
 	return &pb.VerificationResponse{Valid: true}, nil
+}
 
+func (s *server) SimpleVerification(ctx context.Context, in *pb.VerificationRequest) (*pb.VerificationResponse, error) {
+	if matcher.MatchString(in.GetEmail()) {
+		_, err := net.LookupIP(strings.Split(in.Email, "@")[1])
+		if err != nil {
+			return &pb.VerificationResponse{Valid: false, ErrorMessage: &errorMessage}, nil
+		}
+		return &pb.VerificationResponse{Valid: true}, nil
+	}
+	return &pb.VerificationResponse{Valid: false, ErrorMessage: &errorMessage}, nil
 }
 
 func main() {
@@ -41,7 +51,6 @@ func main() {
 		log.Fatalf("failed to listen: %v", err)
 	}
 	s := grpc.NewServer()
-	reflection.Register(s)
 	// Register Greeter on the server.
 	pb.RegisterMailVerifierServer(s, &server{})
 	// Register reflection service on gRPC server.
