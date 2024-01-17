@@ -1,0 +1,9 @@
+syntax = "proto3";
+
+option go_package = ".hackathon/generated";
+
+message VerificationOutput {
+    string email = 1;
+    bool valid = 2;
+    optional string error_message = 3;
+}
