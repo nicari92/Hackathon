@@ -8,7 +8,7 @@ let mailVerifierPort = __ENV.MAIL_VERIFIER_PORT || "9090"
 let mailVerifierAddress = `${mailVerifierHost}:${mailVerifierPort}`
 
 const client = new grpc.Client();
-client.load(['../../protos/'], 'service.proto');
+client.load(['../../app/protos/'], 'service.proto');
 
 export let options = {
   scenarios: {
