@@ -125,12 +125,12 @@ func main() {
 	s := grpc.NewServer()
 	pb.RegisterMailVerifierServer(s, &server{})
 	reflection.Register(s)
-	conn, err := grpc.Dial(fmt.Sprintf("%s:%d", vrfyHost, vrfyPort), grpc.WithTransportCredentials(insecure.NewCredentials()))
+	vrfyConnection, err := grpc.Dial(fmt.Sprintf("%s:%d", vrfyHost, vrfyPort), grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
 		log.Fatalf("did not connect: %v", err)
 	}
-	defer conn.Close()
-	vrfyClient = pb.NewVrfyServiceClient(conn)
+	defer vrfyConnection.Close()
+	vrfyClient = pb.NewVrfyServiceClient(vrfyConnection)
 
 	pubSubClient, err = pubsub.NewClient(context.Background(), pubSubProject)
 	pubSubTopic = pubSubClient.Topic(pubSubTopicName)

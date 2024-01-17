@@ -11,7 +11,7 @@ services:
   pubsub_emulator:
     image: eu.gcr.io/jobrapido-sandbox/pubsub-emulator:1.0
     ports:
-      - "8085"
+      - "8085:8085"
 
   service:
     depends_on:
@@ -23,5 +23,6 @@ services:
       - VRFY_PORT=9091
       - PUBSUB_TOPIC=test-topics
       - PUBSUB_PROJECT=test-project
+      - PUBSUB_EMULATOR_HOST=localhost:8085
     ports:
       - "9090:9090"
