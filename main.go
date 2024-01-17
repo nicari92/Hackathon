@@ -52,16 +52,18 @@ func (s *server) FullVerification(ctx context.Context, in *pb.VerificationReques
 	if !r.Valid {
 		return &pb.VerificationResponse{Valid: false, ErrorMessage: &errorMessage}, nil
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second/2)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	vrfyResponse, err := vrfyClient.Verify(ctx, &pb.VrfyRequest{Email: in.Email})
 	if err != nil {
+		log.Printf("Vrfy response: %s", err)
 		return &pb.VerificationResponse{Valid: false, ErrorMessage: &errorMessage}, nil
+
 	}
 	if vrfyResponse.StatusCode != 0 {
 		return &pb.VerificationResponse{Valid: false, ErrorMessage: &errorMessage}, nil
 	}
-	return &pb.VerificationResponse{Valid: true, ErrorMessage: &errorMessage}, nil
+	return &pb.VerificationResponse{Valid: true}, nil
 }
 
 func main() {
@@ -71,7 +73,7 @@ func main() {
 		log.Fatalf("failed to parse SERVER_PORT: %v", err)
 	}
 
-	vrfyAddr := os.Getenv("VRFY_ENDPOINT")
+	vrfyHost := os.Getenv("VRFY_ENDPOINT")
 	vrfyPort, err := strconv.Atoi(os.Getenv("VRFY_PORT"))
 	if err != nil {
 		log.Fatalf("failed to parse VRFY_PORT: %v", err)
@@ -84,8 +86,7 @@ func main() {
 	s := grpc.NewServer()
 	pb.RegisterMailVerifierServer(s, &server{})
 	reflection.Register(s)
-
-	conn, err := grpc.Dial(fmt.Sprintf("%s:%d", vrfyAddr, vrfyPort), grpc.WithTransportCredentials(insecure.NewCredentials()))
+	conn, err := grpc.Dial(fmt.Sprintf("%s:%d", vrfyHost, vrfyPort), grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
 		log.Fatalf("did not connect: %v", err)
 	}
